@@ -15,12 +15,15 @@ import timber.log.Timber
 import java.io.IOException
 
 /**
- * Root NCM mode switches the live configfs gadget to `ffs.adb + ncm.usb0`, then lets Ethernet
- * tethering configure `usb0` because some devices do not expose NCM as a USB tethering type.
+ * Root NCM mode switches the live configfs gadget to `ffs.adb + ncm.<usbN>`, then lets Ethernet
+ * tethering configure that interface because some devices do not expose NCM as a USB tethering type.
  */
 object UsbTethering {
     const val KEY_MODE = "service.usbTetheringMode"
+    const val KEY_NCM_INTERFACE = "service.usbTethering.ncmInterface"
+    const val DEFAULT_NCM_INTERFACE = "usb0"
     private const val DOLLAR = '$'
+    private val ncmInterfaceRegex = Regex("usb\\d+")
 
     enum class Mode {
         System,
@@ -36,7 +39,13 @@ object UsbTethering {
         }
     }
 
-    fun isActiveNcmInterface(iface: String?) = iface == "usb0"
+    fun isValidNcmInterface(iface: String) = ncmInterfaceRegex.matches(iface)
+
+    fun ncmInterface() = app.pref.getString(KEY_NCM_INTERFACE, null)?.takeIf(::isValidNcmInterface)
+        ?: DEFAULT_NCM_INTERFACE
+
+    fun isActiveNcmInterface(iface: String?) = Build.VERSION.SDK_INT >= 30 && Mode.current() == Mode.Ncm &&
+            iface == ncmInterface()
 
     fun start(callback: TetheringManagerCompat.StartTetheringCallback) {
         val mode = if (Build.VERSION.SDK_INT >= 30) Mode.current() else Mode.System
@@ -53,17 +62,47 @@ object UsbTethering {
     private fun startRootNcm(callback: TetheringManagerCompat.StartTetheringCallback) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
-                executeScript(applyNcmScript())
-                TetheringManagerCompat.startTethering(TetheringManagerCompat.TETHERING_ETHERNET, true, callback)
+                val iface = ncmInterface()
+                Timber.i("Applying NCM gadget function for $iface")
+                executeScript(applyNcmScript(iface))
+                TetheringManagerCompat.startTethering(TetheringManagerCompat.TETHERING_ETHERNET, true,
+                        object : TetheringManagerCompat.StartTetheringCallback {
+                    override fun onTetheringStarted() = callback.onTetheringStarted()
+                    override fun onTetheringFailed(error: Int?) {
+                        GlobalScope.launch(Dispatchers.IO) {
+                            try {
+                                executeScript(cleanupNcmScript())
+                            } catch (e: Exception) {
+                                Timber.w(e, "Failed to clean up NCM gadget after tethering failure")
+                            }
+                            callback.onTetheringFailed(error)
+                        }
+                    }
+                    override fun onException(e: Exception) {
+                        GlobalScope.launch(Dispatchers.IO) {
+                            try {
+                                executeScript(cleanupNcmScript())
+                            } catch (eCleanup: Exception) {
+                                e.addSuppressed(eCleanup)
+                            }
+                            callback.onException(e)
+                        }
+                    }
+                })
             } catch (e: Exception) {
                 Timber.e(e, "Failed to apply NCM gadget function")
+                try {
+                    executeScript(cleanupNcmScript())
+                } catch (eCleanup: Exception) {
+                    e.addSuppressed(eCleanup)
+                }
                 callback.onException(e)
             }
         }
     }
 
     fun stop(usingNcm: Boolean, callback: TetheringManagerCompat.StopTetheringCallback) {
-        if (Build.VERSION.SDK_INT < 30 || !usingNcm) {
+        if (Build.VERSION.SDK_INT < 30 || !usingNcm && Mode.current() != Mode.Ncm) {
             Timber.i("USB tether stop requested, usingNcm=$usingNcm, type=${TetheringManagerCompat.TETHERING_USB}")
             TetheringManagerCompat.stopTethering(TetheringManagerCompat.TETHERING_USB, callback)
             return
@@ -79,15 +118,25 @@ object UsbTethering {
                 if (firstError == null) firstError = error
                 if (firstException == null) firstException = exception
                 if (--pending != 0) return
-                firstException?.let {
-                    callback.onException(it)
-                    return
+                GlobalScope.launch(Dispatchers.IO) {
+                    try {
+                        executeScript(cleanupNcmScript())
+                    } catch (e: Exception) {
+                        firstException?.addSuppressed(e) ?: run {
+                            callback.onException(e)
+                            return@launch
+                        }
+                    }
+                    firstException?.let {
+                        callback.onException(it)
+                        return@launch
+                    }
+                    firstError?.let {
+                        callback.onStopTetheringFailed(it)
+                        return@launch
+                    }
+                    callback.onStopTetheringSucceeded()
                 }
-                firstError?.let {
-                    callback.onStopTetheringFailed(it)
-                    return
-                }
-                callback.onStopTetheringSucceeded()
             }
 
             override fun onStopTetheringSucceeded() = finish()
@@ -128,20 +177,97 @@ object UsbTethering {
         }
     }
 
-    private fun applyNcmScript(): String {
+    private fun applyNcmScript(iface: String): String {
         return """
+            set -e
+            IFACE=$iface
+            case "${DOLLAR}IFACE" in
+                usb*) ;;
+                *) echo "Invalid NCM interface: ${DOLLAR}IFACE" >&2; exit 64 ;;
+            esac
+            case "${DOLLAR}{IFACE#usb}" in
+                ''|*[!0-9]*) echo "Invalid NCM interface: ${DOLLAR}IFACE" >&2; exit 64 ;;
+            esac
             G=/config/usb_gadget/g1
-            C=${DOLLAR}(find ${DOLLAR}G/configs -maxdepth 1 -type d | grep -E "/configs/[^/]+${DOLLAR}" | head -n1)
-            UDC=${DOLLAR}(ls /sys/class/udc | head -n1)
+            C=
+            for d in "${DOLLAR}G"/configs/*; do
+                [ -d "${DOLLAR}d" ] || continue
+                C=${DOLLAR}d
+                break
+            done
+            UDC=
+            for u in /sys/class/udc/*; do
+                [ -e "${DOLLAR}u" ] || continue
+                UDC=${DOLLAR}{u##*/}
+                break
+            done
+            FUNC=ncm.${DOLLAR}IFACE
+            [ -n "${DOLLAR}C" ] || { echo "USB gadget config not found" >&2; exit 1; }
+            [ -n "${DOLLAR}UDC" ] || { echo "USB device controller not found" >&2; exit 1; }
             echo "G=${DOLLAR}G"
             echo "C=${DOLLAR}C"
             echo "UDC=${DOLLAR}UDC"
-            mkdir -p "${DOLLAR}G/functions/ncm.usb0"
-            mkdir -p "${DOLLAR}G/functions/ecm.usb0"
+            echo "IFACE=${DOLLAR}IFACE"
             echo "" > "${DOLLAR}G/UDC"
-            find "${DOLLAR}C" -maxdepth 1 -type l -exec rm -f {} \;
+            for f in "${DOLLAR}C"/*; do
+                [ -L "${DOLLAR}f" ] || continue
+                rm -f "${DOLLAR}f"
+            done
+            for f in "${DOLLAR}G"/functions/ncm.usb[0-9]* "${DOLLAR}G"/functions/ecm.usb[0-9]*; do
+                [ -e "${DOLLAR}f" ] || continue
+                rmdir "${DOLLAR}f" 2>/dev/null || true
+            done
+            mkdir -p "${DOLLAR}G/functions/${DOLLAR}FUNC"
             ln -s "${DOLLAR}G/functions/ffs.adb" "${DOLLAR}C/f1"
-            ln -s "${DOLLAR}G/functions/ncm.usb0" "${DOLLAR}C/f2"
+            ln -s "${DOLLAR}G/functions/${DOLLAR}FUNC" "${DOLLAR}C/f2"
+            echo "${DOLLAR}UDC" > "${DOLLAR}G/UDC"
+            i=0
+            while [ "${DOLLAR}i" -lt 50 ]; do
+                ACTUAL=${DOLLAR}(cat "${DOLLAR}G/functions/${DOLLAR}FUNC/ifname" 2>/dev/null || true)
+                [ -n "${DOLLAR}ACTUAL" ] && [ "${DOLLAR}ACTUAL" != "(unnamed net_device)" ] && break
+                i=${DOLLAR}((i + 1))
+                sleep 0.1
+            done
+            [ -n "${DOLLAR}ACTUAL" ] && [ "${DOLLAR}ACTUAL" != "(unnamed net_device)" ] || {
+                echo "NCM network interface was not created" >&2
+                exit 1
+            }
+            if [ "${DOLLAR}ACTUAL" != "${DOLLAR}IFACE" ]; then
+                /system/bin/ip link set dev "${DOLLAR}ACTUAL" down
+                /system/bin/ip link set dev "${DOLLAR}ACTUAL" name "${DOLLAR}IFACE"
+            fi
+            /system/bin/ip link set dev "${DOLLAR}IFACE" up
+        """.trimIndent()
+    }
+
+    private fun cleanupNcmScript(): String {
+        return """
+            set -e
+            G=/config/usb_gadget/g1
+            C=
+            for d in "${DOLLAR}G"/configs/*; do
+                [ -d "${DOLLAR}d" ] || continue
+                C=${DOLLAR}d
+                break
+            done
+            UDC=
+            for u in /sys/class/udc/*; do
+                [ -e "${DOLLAR}u" ] || continue
+                UDC=${DOLLAR}{u##*/}
+                break
+            done
+            [ -n "${DOLLAR}C" ] || { echo "USB gadget config not found" >&2; exit 1; }
+            [ -n "${DOLLAR}UDC" ] || { echo "USB device controller not found" >&2; exit 1; }
+            echo "" > "${DOLLAR}G/UDC"
+            for f in "${DOLLAR}C"/*; do
+                [ -L "${DOLLAR}f" ] || continue
+                rm -f "${DOLLAR}f"
+            done
+            ln -s "${DOLLAR}G/functions/ffs.adb" "${DOLLAR}C/f1"
+            for f in "${DOLLAR}G"/functions/ncm.usb[0-9]* "${DOLLAR}G"/functions/ecm.usb[0-9]*; do
+                [ -e "${DOLLAR}f" ] || continue
+                rmdir "${DOLLAR}f" 2>/dev/null || true
+            done
             echo "${DOLLAR}UDC" > "${DOLLAR}G/UDC"
         """.trimIndent()
     }

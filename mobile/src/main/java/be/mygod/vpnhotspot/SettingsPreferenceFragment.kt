@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.ext.SdkExtensions
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.preference.EditTextPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.TwoStatePreference
@@ -80,6 +81,16 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         if (Build.VERSION.SDK_INT < 30) {
             findPreference<Preference>(LocalOnlyHotspotService.KEY_USE_SYSTEM)!!.remove()
             findPreference<Preference>(UsbTethering.KEY_MODE)!!.remove()
+            findPreference<Preference>(UsbTethering.KEY_NCM_INTERFACE)!!.remove()
+        } else {
+            val ncmInterface = findPreference<EditTextPreference>(UsbTethering.KEY_NCM_INTERFACE)!!
+            SummaryFallbackProvider(ncmInterface)
+            ncmInterface.setOnPreferenceChangeListener { _, newValue ->
+                if (UsbTethering.isValidNcmInterface(newValue as String)) true else {
+                    SmartSnackbar.make(R.string.settings_service_usb_tethering_ncm_interface_invalid).show()
+                    false
+                }
+            }
         }
         findPreference<Preference>("service.clean")!!.setOnPreferenceClickListener {
             GlobalScope.launch { RoutingManager.clean() }

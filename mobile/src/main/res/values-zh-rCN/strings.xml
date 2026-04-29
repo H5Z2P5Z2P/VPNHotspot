@@ -122,6 +122,9 @@
     <string name="settings_service_usb_tethering_mode">USB 网络共享模式</string>
     <string name="settings_service_usb_tethering_mode_system">系统默认</string>
     <string name="settings_service_usb_tethering_mode_ncm">NCM（root）</string>
+    <string name="settings_service_usb_tethering_ncm_interface">NCM 接口</string>
+    <string name="settings_service_usb_tethering_ncm_interface_summary">usb0</string>
+    <string name="settings_service_usb_tethering_ncm_interface_invalid">请输入 usb 加数字，例如 usb0。</string>
     <string name="settings_service_auto_start">自动启动服务</string>
     <string name="settings_service_auto_start_summary">设备重启或应用升级后自动恢复之前运行的服务</string>
     <string name="settings_service_repeater_safe_mode">中继安全模式</string>

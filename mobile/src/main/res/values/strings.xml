@@ -139,6 +139,9 @@
     <string name="settings_service_usb_tethering_mode">USB tethering mode</string>
     <string name="settings_service_usb_tethering_mode_system">System default</string>
     <string name="settings_service_usb_tethering_mode_ncm">NCM (root)</string>
+    <string name="settings_service_usb_tethering_ncm_interface">NCM interface</string>
+    <string name="settings_service_usb_tethering_ncm_interface_summary">usb0</string>
+    <string name="settings_service_usb_tethering_ncm_interface_invalid">Use usb followed by digits, for example usb0.</string>
     <string name="settings_service_auto_start">Auto start services</string>
     <string name="settings_service_auto_start_summary">Restore services if they were running before device reboot or app
         update</string>

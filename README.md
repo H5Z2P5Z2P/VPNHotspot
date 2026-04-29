@@ -395,11 +395,13 @@ Other:
   `android.net.BpfNetMapsConstants`, may be jarjar-relocated under the optional prefixes
   `android.net.connectivity` or `com.android.connectivity`.
 * App-managed NCM USB mode uses a root configfs rewrite on API 30+. It assumes a writable configfs
-  gadget under `/config/usb_gadget`; it creates `ncm.usb0`/`ecm.usb0`, rewires the current config
-  to `ffs.adb + ncm.usb0`, then starts Ethernet tethering so the platform `IpServer`/DHCP path
-  configures `usb0`. Stopping NCM mode stops both the Ethernet tethering request and any stale
-  USB tethering request; the platform USB stack restores the normal USB config when USB is
-  reconfigured.
+  gadget under `/config/usb_gadget`; the configured interface must match `usb\d+` and defaults to
+  `usb0`. It removes stale app-managed `ncm.usb*`/`ecm.usb*` functions, creates `ncm.<usbN>`,
+  rewires the current config to `ffs.adb + ncm.<usbN>`, renames the created netdev to the configured
+  `usbN` if needed, then starts Ethernet tethering so the platform `IpServer`/DHCP/NAT path
+  configures that interface. Stopping NCM mode stops both the Ethernet tethering request and any
+  stale USB tethering request, clears the config back to `ffs.adb`, removes app-managed
+  `ncm.usb*`/`ecm.usb*` functions, then rebinds the UDC.
 * (since API 30) When runtime `TetheringEventCallback.onLocalOnlyInterfacesChanged` is present, AOSP dispatches
   startup tether-state callbacks from one `executor.execute { ... }` block in `onCallbackStarted`,
   and later tether-state updates from one `executor.execute { ... }` block in
@@ -412,7 +414,7 @@ DHCP server like `dnsmasq` is assumed to run and send DHCP packets as root.
 Undocumented system binaries are all bundled and executable:
 
 * `iptables-save`, `ip6tables-save`;
-* `cat`, `ln`, `mkdir`, `readlink`, `rm`;
+* `cat`, `ln`, `mkdir`, `readlink`, `rm`, `rmdir`, `sleep`;
 * `echo`;
 * `/system/bin/ip` (`address link monitor neigh rule unreachable`);
 * `ndc` (`ipfwd nat network`);

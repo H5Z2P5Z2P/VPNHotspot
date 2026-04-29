@@ -118,6 +118,12 @@ object TetheringManagerCompat {
      */
     const val TETHERING_USB = 1
     /**
+     * NCM tethering type.
+     * @see startTethering
+     */
+    @RequiresApi(30)
+    const val TETHERING_NCM = 4
+    /**
      * Bluetooth tethering type.
      *
      * Requires BLUETOOTH permission.

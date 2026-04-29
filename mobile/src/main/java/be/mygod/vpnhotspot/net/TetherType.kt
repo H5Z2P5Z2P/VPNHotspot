@@ -7,6 +7,7 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.RequiresApi
 import be.mygod.vpnhotspot.App.Companion.app
 import be.mygod.vpnhotspot.R
+import be.mygod.vpnhotspot.manage.UsbTethering
 import be.mygod.vpnhotspot.util.Event0
 import be.mygod.vpnhotspot.util.findIdentifier
 import timber.log.Timber
@@ -118,37 +119,41 @@ enum class TetherType(@DrawableRes val icon: Int) {
          *
          * Based on: https://android.googlesource.com/platform/frameworks/base/+/5d36f01/packages/Tethering/src/com/android/networkstack/tethering/Tethering.java#479
          */
-        fun ofInterface(iface: String?, p2pDev: String? = null) = when (iface) {
-            null -> NONE
-            p2pDev -> WIFI_P2P
-            else -> TetheringManagerCompat.getInterfaceType(iface)?.let { fromTetheringType(it) } ?: try {
-                synchronized(this) {
-                    if (requiresUpdate) updateRegexs()
-                    when {
-                        wifiRegexs.any { it.matcher(iface).matches() } -> WIFI
-                        wigigRegexs.any { it.matcher(iface).matches() } -> WIGIG
-                        wifiP2pRegexs.any { it.matcher(iface).matches() } -> WIFI_P2P
-                        usbRegexs.any { it.matcher(iface).matches() } -> USB
-                        bluetoothRegexs.any { it.matcher(iface).matches() } -> BLUETOOTH
-                        ncmRegexs.any { it.matcher(iface).matches() } -> NCM
-                        ethernetRegex?.matcher(iface)?.matches() == true -> ETHERNET
-                        // https://cs.android.com/android/platform/superproject/main/+/main:packages/modules/Connectivity/Tethering/src/com/android/networkstack/tethering/Tethering.java;l=979;drc=b4d6320e2ae398b36f0aaafb2ecd83609d2d99af
-                        iface == "avf_tap_fixed" -> VIRTUAL
-                        else -> NONE
+        fun ofInterface(iface: String?, p2pDev: String? = null): TetherType {
+            val actual = iface ?: return NONE
+            return actual.let {
+                when {
+                    it == p2pDev -> WIFI_P2P
+                    UsbTethering.isActiveNcmInterface(it) -> NCM
+                    else -> TetheringManagerCompat.getInterfaceType(it)?.let { type -> fromTetheringType(type) } ?: try {
+                        synchronized(this) {
+                            if (requiresUpdate) updateRegexs()
+                            when {
+                                wifiRegexs.any { regex -> regex.matcher(it).matches() } -> WIFI
+                                wigigRegexs.any { regex -> regex.matcher(it).matches() } -> WIGIG
+                                wifiP2pRegexs.any { regex -> regex.matcher(it).matches() } -> WIFI_P2P
+                                usbRegexs.any { regex -> regex.matcher(it).matches() } -> USB
+                                bluetoothRegexs.any { regex -> regex.matcher(it).matches() } -> BLUETOOTH
+                                ncmRegexs.any { regex -> regex.matcher(it).matches() } -> NCM
+                                ethernetRegex?.matcher(it)?.matches() == true -> ETHERNET
+                                // https://cs.android.com/android/platform/superproject/main/+/main:packages/modules/Connectivity/Tethering/src/com/android/networkstack/tethering/Tethering.java;l=979;drc=b4d6320e2ae398b36f0aaafb2ecd83609d2d99af
+                                it == "avf_tap_fixed" -> VIRTUAL
+                                else -> NONE
+                            }
+                        }
+                    } catch (e: RuntimeException) {
+                        Timber.w(e)
+                        NONE
                     }
                 }
-            } catch (e: RuntimeException) {
-                Timber.w(e)
-                NONE
             }
         }
-
         fun fromTetheringType(type: Int) = when (type) {
             TetheringManager.TETHERING_WIFI -> WIFI
             TetheringManagerCompat.TETHERING_USB -> USB
             TetheringManagerCompat.TETHERING_BLUETOOTH -> BLUETOOTH
             3 -> WIFI_P2P
-            4 -> NCM
+            TetheringManagerCompat.TETHERING_NCM -> NCM
             TetheringManagerCompat.TETHERING_ETHERNET -> ETHERNET
             6 -> WIGIG
             7 -> VIRTUAL

@@ -17,6 +17,15 @@
         <item>Netd</item>
     </string-array>
 
+    <string-array name="settings_service_usb_tethering_mode">
+        <item>@string/settings_service_usb_tethering_mode_system</item>
+        <item>@string/settings_service_usb_tethering_mode_ncm</item>
+    </string-array>
+    <string-array name="settings_service_usb_tethering_mode_values">
+        <item>System</item>
+        <item>Ncm</item>
+    </string-array>
+
     <string-array name="settings_service_wifi_lock">
         <item>@string/settings_service_wifi_lock_none</item>
         <item>@string/settings_service_wifi_lock_full</item>

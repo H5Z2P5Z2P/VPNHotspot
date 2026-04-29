@@ -160,8 +160,10 @@ sealed class TetheringTileService : IpNeighbourMonitoringTileService(), Tetherin
         override val labelString get() = R.string.tethering_manage_usb
         override val tetherType get() = TetherType.USB
 
-        override fun start() = TetheringManagerCompat.startTethering(TetheringManagerCompat.TETHERING_USB, true, this)
-        override fun stop() = TetheringManagerCompat.stopTethering(TetheringManagerCompat.TETHERING_USB, this)
+        override fun start() = UsbTethering.start(this)
+        override fun stop() = UsbTethering.stop((interested ?: emptyList()).any {
+            TetherType.ofInterface(it) == TetherType.NCM
+        }, this)
     }
     class Bluetooth : TetheringTileService() {
         private var tethering: BluetoothTethering? = null

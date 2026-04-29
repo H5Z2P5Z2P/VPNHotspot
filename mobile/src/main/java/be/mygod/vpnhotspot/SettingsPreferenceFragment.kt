@@ -14,6 +14,7 @@ import be.mygod.vpnhotspot.net.TetherOffloadManager
 import be.mygod.vpnhotspot.net.monitor.FallbackUpstreamMonitor
 import be.mygod.vpnhotspot.net.monitor.IpMonitor
 import be.mygod.vpnhotspot.net.monitor.UpstreamMonitor
+import be.mygod.vpnhotspot.manage.UsbTethering
 import be.mygod.vpnhotspot.net.wifi.WifiDoubleLock
 import be.mygod.vpnhotspot.preference.AutoCompleteNetworkPreferenceDialogFragment
 import be.mygod.vpnhotspot.preference.SharedPreferenceDataStore
@@ -76,7 +77,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             val safeMode = findPreference<Preference>(RepeaterService.KEY_SAFE_MODE)!!
             safeMode.remove()
         }
-        if (Build.VERSION.SDK_INT < 30) findPreference<Preference>(LocalOnlyHotspotService.KEY_USE_SYSTEM)!!.remove()
+        if (Build.VERSION.SDK_INT < 30) {
+            findPreference<Preference>(LocalOnlyHotspotService.KEY_USE_SYSTEM)!!.remove()
+            findPreference<Preference>(UsbTethering.KEY_MODE)!!.remove()
+        }
         findPreference<Preference>("service.clean")!!.setOnPreferenceClickListener {
             GlobalScope.launch { RoutingManager.clean() }
             true

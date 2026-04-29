@@ -76,20 +76,20 @@ data class TetherStates(
          */
         @MainThread
         override fun onReceive(context: Context?, intent: Intent) {
-            val available = intent.getStringArrayListExtra("availableArray") ?: return
-            val tethered = intent.getStringArrayListExtra("tetherArray") ?: return
-            val localOnly = intent.getStringArrayListExtra(
+            val available = LinkedHashSet(intent.getStringArrayListExtra("availableArray") ?: return)
+            val tethered = LinkedHashSet(intent.getStringArrayListExtra("tetherArray") ?: return)
+            val localOnly = LinkedHashSet(intent.getStringArrayListExtra(
                 if (Build.VERSION.SDK_INT >= 30) "android.net.extra.ACTIVE_LOCAL_ONLY" else
-                    "localOnlyArray") ?: return
-            val errored = intent.getStringArrayListExtra("erroredArray")
-                ?.associateWith { states.errored[it] ?: 0 } ?: return
-            states = TetherStates(available.toSet(), tethered.toSet(), localOnly.toSet(), errored)
+                    "localOnlyArray") ?: return)
+            val errored = LinkedHashMap(intent.getStringArrayListExtra("erroredArray")
+                ?.associateWith { states.errored[it] ?: 0 } ?: return)
+            states = TetherStates(available, tethered, localOnly, errored)
             if (fallbackToBroadcast) {
                 errored.forEach { (iface, error) -> callback.onError(iface, error) }
-                callback.onTetherableInterfacesChanged(available)
-                callback.onTetheredInterfacesChanged(tethered)
+                callback.onTetherableInterfacesChanged(available.toList())
+                callback.onTetheredInterfacesChanged(tethered.toList())
             }
-            callback.onLocalOnlyInterfacesChanged(localOnly)
+            callback.onLocalOnlyInterfacesChanged(localOnly.toList())
             scheduleDispatch()
         }
 
@@ -115,8 +115,8 @@ data class TetherStates(
 
         @MainThread
         override fun onTetherableInterfacesChanged(interfaces: List<String?>) {
-            val available = interfaces.filterNotNull().toSet()
-            callback.onTetherableInterfacesChanged(interfaces)
+            val available = LinkedHashSet(interfaces.filterNotNull())
+            callback.onTetherableInterfacesChanged(available.toList())
             states = states.copy(
                 available = available,
                 errored = states.errored.filterKeys { it !in available },
@@ -126,8 +126,8 @@ data class TetherStates(
 
         @MainThread
         override fun onTetheredInterfacesChanged(interfaces: List<String?>) {
-            val tethered = interfaces.filterNotNull().toSet()
-            callback.onTetheredInterfacesChanged(interfaces)
+            val tethered = LinkedHashSet(interfaces.filterNotNull())
+            callback.onTetheredInterfacesChanged(tethered.toList())
             states = states.copy(
                 tethered = tethered,
                 errored = states.errored.filterKeys { it !in tethered },
@@ -137,8 +137,8 @@ data class TetherStates(
 
         @MainThread
         override fun onLocalOnlyInterfacesChanged(interfaces: List<String?>) {
-            val localOnly = interfaces.filterNotNull().toSet()
-            callback.onLocalOnlyInterfacesChanged(interfaces)
+            val localOnly = LinkedHashSet(interfaces.filterNotNull())
+            callback.onLocalOnlyInterfacesChanged(localOnly.toList())
             states = states.copy(
                 localOnly = localOnly,
                 errored = states.errored.filterKeys { it !in localOnly },
@@ -148,6 +148,11 @@ data class TetherStates(
 
         override fun onClientsChanged(clients: Collection<Parcelable>) = callback.onClientsChanged(clients)
         override fun onOffloadStatusChanged(status: Int) = callback.onOffloadStatusChanged(status)
+
+        @MainThread
+        fun refreshInterfaceMappings() {
+            // NCM gadget rewrites must not fabricate tether states before the system moves DHCP/IP.
+        }
 
         @MainThread
         fun register() {
@@ -197,5 +202,10 @@ data class TetherStates(
 
         @MainThread
         fun unregisterCallback(callback: Callback) = registrations.remove(callback)?.unregister()
+
+        @MainThread
+        fun refreshInterfaceMappings() {
+            registrations.values.forEach { it.refreshInterfaceMappings() }
+        }
     }
 }

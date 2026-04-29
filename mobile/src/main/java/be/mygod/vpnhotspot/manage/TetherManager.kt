@@ -285,8 +285,8 @@ sealed class TetherManager(protected val parent: TetheringFragment) : Manager(),
         override val tetherType get() = TetherType.USB
         override val type get() = VIEW_TYPE_USB
 
-        override fun start() = TetheringManagerCompat.startTethering(TetheringManagerCompat.TETHERING_USB, true, this)
-        override fun stop() = TetheringManagerCompat.stopTethering(TetheringManagerCompat.TETHERING_USB, this)
+        override fun start() = UsbTethering.start(this)
+        override fun stop() = UsbTethering.stop(parent.tetheredTypes.contains(TetherType.NCM), this)
     }
     class Bluetooth(parent: TetheringFragment, adapter: BluetoothAdapter) :
         TetherManager(parent), DefaultLifecycleObserver {
